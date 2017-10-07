@@ -15,12 +15,8 @@ int main(int argc, char ** argv)
 {
   int sd;
   struct sockaddr_in addr;
-  struct packet_data {
-    int type;
-    char buf[2048];
-  };
 
-  struct packet_data pkt;
+  int buf;
   
   if ((sd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
     perror("socket");
@@ -32,17 +28,16 @@ int main(int argc, char ** argv)
   addr.sin_addr.s_addr = inet_addr("192.168.182.138");
 
   while (1) {
-    char * buf2;
-    printf("type>>");
-    scanf("%d", &pkt.type);
-    printf(">>");
-    scanf("%s", pkt.buf);
+    char  p_type[8];
 
-    if (sendto(sd, &pkt, sizeof(struct packet_data), 0, (struct sockaddr *)&addr, sizeof(addr)) < 0 ) {
+    printf(">>>");
+    scanf("%d", &buf);
+    
+    if (sendto(sd, &buf, sizeof(int), 0, (struct sockaddr *)&addr, sizeof(addr)) < 0 ) {
       perror("send");
       return -1;
     }
-    if (strcmp("exit", pkt.buf) == 0) {
+    if (buf == 0) {
       break;
     }
   }

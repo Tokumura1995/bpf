@@ -13,6 +13,7 @@
 #include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/udp.h>
 #include "libbpf.h"
 
 #define LOG_BUF_SIZE 1024
@@ -29,6 +30,11 @@ static inline __u64 ptr_to_u64(const void *ptr)
 	return (__u64) (unsigned long) ptr;
 }
 
+static inline __u32 ptr_to_u32(const void *ptr)
+{
+	return (__u32) (unsigned long) ptr;
+}
+
 static inline int sys_bpf(enum bpf_cmd cmd, union bpf_attr *attr, unsigned int size)
 {
 	return syscall(__NR_bpf, cmd, attr, size);
@@ -43,12 +49,12 @@ int main(int argc, char ** argv)
   socklen_t sin_size;
   struct sockaddr_in from_addr;
 
-  char buf[2048];
+  int buf;
   int buf2;
 
   int map_fd, prog_fd;
   int key;
-  char  value[8];
+  int value;
 
   if ((map_fd = bpf_create_map(BPF_MAP_TYPE_ARRAY, sizeof(key), sizeof(value), 3)) < 0) {
     perror("bpf_create_map");
@@ -56,8 +62,8 @@ int main(int argc, char ** argv)
   }
 
   int key2= 2;
-  char *value2 = "aaaa";
-  if ((bpf_update_elem(map_fd, &key2, value2, BPF_ANY)) < 0) {
+  int value2 = 32;
+  if ((bpf_update_elem(map_fd, &key2, &value2, BPF_ANY)) < 0) {
     perror("bpf_update_elem");
     return -1;
   }
@@ -65,17 +71,17 @@ int main(int argc, char ** argv)
   
   struct bpf_insn prog[] = {
     BPF_MOV64_REG(BPF_REG_6, BPF_REG_1),
-    BPF_LD_ABS(BPF_B, 8),
+    BPF_MOV64_REG(BPF_REG_3, BPF_REG_1),
+    BPF_ALU64_IMM(BPF_ADD, BPF_REG_3, 32),
     BPF_ST_MEM(BPF_DW, BPF_REG_10, -8, 0),
     BPF_MOV64_REG(BPF_REG_2, BPF_REG_10),
     BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, -8),
-    BPF_STX_MEM(BPF_DW, BPF_REG_10, BPF_REG_0, -16),
+    BPF_STX_MEM(BPF_DW, BPF_REG_10, BPF_REG_3, -16),
     BPF_MOV64_REG(BPF_REG_3, BPF_REG_10),
     BPF_ALU64_IMM(BPF_ADD, BPF_REG_3, -16),
     BPF_MOV64_IMM(BPF_REG_4, BPF_ANY),
     BPF_LD_MAP_FD(BPF_REG_1, map_fd),
     BPF_RAW_INSN(BPF_JMP | BPF_CALL, 0, 0, 0, BPF_FUNC_map_update_elem),
-    
     BPF_EXIT_INSN(),
   };
     
@@ -93,12 +99,12 @@ int main(int argc, char ** argv)
     return -1;
   }
   
-  while (strcmp(buf, "start") != 0) {
-    if(recvfrom(sd, buf, sizeof(buf), 0, (struct sockaddr *)&from_addr, &sin_size) < 0) {
+  while (buf != 1) {
+    if(recvfrom(sd, &buf, sizeof(buf), 0, (struct sockaddr *)&from_addr, &sin_size) < 0) {
       perror("recvfrom");
       return -1;
     }
-    printf("buf = %s\n", buf);
+    printf("buf = %d\n", buf);
   }
   
   if ((prog_fd = bpf_prog_load(BPF_PROG_TYPE_SOCKET_FILTER, prog, sizeof(prog), "GPL")) < 0) {
@@ -116,20 +122,14 @@ int main(int argc, char ** argv)
     int i = 0;
     while (i < 3) {
       int key1 = i;
-      char  value1[8];
-      
-      if(bpf_lookup_elem(map_fd, &key1, value1) < 0) {
+      int value1;
+            
+      if(bpf_lookup_elem(map_fd, &key1, &value1) < 0) {
 	printf("bpf_lookup_elem() err=%d\n%s", errno, bpf_log_buf);
 	return -1;	
       }
-      printf("key[%d]::value = %s\n", i, value1);
-      /*
-      int j = 0;
-      while (j <16) {
-	printf("value[%d] = %c\n", j, value[j]);
-	j++;
-	  }
-      */
+
+      printf("key[%d]::value = %d\n", i, value1);
       i++;
     }
     sleep(1);
@@ -144,7 +144,7 @@ int bpf_create_map(enum bpf_map_type map_type, unsigned int key_size, unsigned i
 {
   union bpf_attr attr;
   memset(&attr, '\0', sizeof(attr));
-  
+ 
   attr.map_type    = map_type;
   attr.key_size    = key_size;
   attr.value_size  = value_size;
